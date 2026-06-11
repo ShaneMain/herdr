@@ -839,6 +839,14 @@ pub enum AgentPanelScope {
     AllWorkspaces,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AgentPanelSort {
+    #[default]
+    Natural,
+    WorkingFirst,
+    Attention,
+}
+
 // ---------------------------------------------------------------------------
 // Settings UI state
 // ---------------------------------------------------------------------------
@@ -1341,6 +1349,7 @@ pub struct AppState {
     /// Ratio of sidebar height allocated to the workspaces section.
     pub sidebar_section_split: f32,
     pub agent_panel_scope: AgentPanelScope,
+    pub agent_panel_sort: AgentPanelSort,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
     pub mouse_capture: bool,
@@ -1690,6 +1699,7 @@ impl AppState {
             sidebar_collapsed: false,
             sidebar_section_split: 0.5,
             agent_panel_scope: AgentPanelScope::AllWorkspaces,
+            agent_panel_sort: AgentPanelSort::Natural,
             mouse_capture: true,
             right_click_passthrough_modifiers: None,
             right_click_passthrough: None,

@@ -288,6 +288,7 @@ confirm_close = true
 prompt_new_tab_name = true
 show_agent_labels_on_pane_borders = false
 agent_panel_scope = "all"
+agent_panel_sort = "natural"
 accent = "cyan"
 ```
 
@@ -296,6 +297,8 @@ accent = "cyan"
 `mobile_width_threshold` controls the terminal width at or below which Herdr uses the mobile single-column layout. The default is 64 columns; increase it for foldables, tablets, or wide phone terminals.
 
 `agent_panel_scope` can be `all` or `current`. Use `current` if you only want the agent panel to show agents in the active workspace.
+
+`agent_panel_sort` can be `natural`, `working-first`, or `attention`. The default `natural` lists agents in workspace order. Use `working-first` to list agents that are currently working at the top of the panel; other agents keep their workspace order below them. Use `attention` to order agents by how much they need you: blocked first, then done, working, idle, and unknown. Within the same status, the most recently changed agent comes first so a large group surfaces what just transitioned, and agents that have not changed since startup keep their workspace order.
 
 `confirm_close` controls whether closing a workspace asks for confirmation. `prompt_new_tab_name` controls whether new tabs ask for a label first.
 

@@ -253,6 +253,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Agent panel scope: "current" or "all". Toggling it in the sidebar saves this setting.
 # agent_panel_scope = "all"
 
+# Agent panel ordering: "natural" (workspace order), "working-first" to list
+# agents that are currently working at the top, or "attention" to order by
+# attention priority (blocked, done, working, idle, unknown).
+# agent_panel_sort = "natural"
+
 # Accent color for highlights, borders, and navigation UI.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"

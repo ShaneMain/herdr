@@ -99,6 +99,15 @@ impl AgentPanelScopeConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentPanelSortConfig {
+    #[default]
+    Natural,
+    WorkingFirst,
+    Attention,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RightClickPassthroughModifierConfig(Option<KeyModifiers>);
 
@@ -442,6 +451,10 @@ pub struct UiConfig {
     pub show_agent_labels_on_pane_borders: bool,
     /// Agent sidebar scope. Saved values are "current" or "all". Default: "all".
     pub agent_panel_scope: AgentPanelScopeConfig,
+    /// Agent sidebar ordering. "working-first" lists working agents at the
+    /// top; "attention" orders by attention priority (blocked, done, working,
+    /// idle, unknown). Default: "natural" (workspace order).
+    pub agent_panel_sort: AgentPanelSortConfig,
     /// Accent color for highlights, borders, and navigation UI.
     /// Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250)).
     pub accent: String,
@@ -627,6 +640,7 @@ impl Default for UiConfig {
             prompt_new_tab_name: true,
             show_agent_labels_on_pane_borders: false,
             agent_panel_scope: AgentPanelScopeConfig::All,
+            agent_panel_sort: AgentPanelSortConfig::Natural,
             accent: "cyan".into(),
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
@@ -804,6 +818,32 @@ agent_panel_scope = "all"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.agent_panel_scope, AgentPanelScopeConfig::All);
+    }
+
+    #[test]
+    fn agent_panel_sort_defaults_natural_and_parses() {
+        let default_config = Config::default();
+        assert_eq!(
+            default_config.ui.agent_panel_sort,
+            AgentPanelSortConfig::Natural
+        );
+
+        let toml = r#"
+[ui]
+agent_panel_sort = "working-first"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(
+            config.ui.agent_panel_sort,
+            AgentPanelSortConfig::WorkingFirst
+        );
+
+        let toml = r#"
+[ui]
+agent_panel_sort = "attention"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Attention);
     }
 
     #[test]

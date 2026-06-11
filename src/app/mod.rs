@@ -213,6 +213,16 @@ fn agent_panel_scope_from_config(
     }
 }
 
+fn agent_panel_sort_from_config(
+    sort: crate::config::AgentPanelSortConfig,
+) -> state::AgentPanelSort {
+    match sort {
+        crate::config::AgentPanelSortConfig::Natural => state::AgentPanelSort::Natural,
+        crate::config::AgentPanelSortConfig::WorkingFirst => state::AgentPanelSort::WorkingFirst,
+        crate::config::AgentPanelSortConfig::Attention => state::AgentPanelSort::Attention,
+    }
+}
+
 /// Parse the configured agent name list into a deduplicated set of `Agent`
 /// values. Unknown agent names are silently dropped so a typo cannot disable
 /// other valid entries.
@@ -375,6 +385,7 @@ impl App {
         };
 
         let agent_panel_scope = agent_panel_scope_from_config(config.ui.agent_panel_scope);
+        let agent_panel_sort = agent_panel_sort_from_config(config.ui.agent_panel_sort);
 
         // Validate sidebar bounds before they reach any `u16::clamp(min, max)`
         // call: `clamp` panics when `min > max`. On bad config, fall back to
@@ -520,6 +531,7 @@ impl App {
             sidebar_collapsed: false,
             sidebar_section_split,
             agent_panel_scope,
+            agent_panel_sort,
             mouse_capture: config.ui.mouse_capture,
             right_click_passthrough_modifiers: config.ui.right_click_passthrough_modifiers(),
             right_click_passthrough: None,
@@ -1248,6 +1260,8 @@ impl App {
                     config.ui.show_agent_labels_on_pane_borders;
                 self.state.agent_panel_scope =
                     agent_panel_scope_from_config(config.ui.agent_panel_scope);
+                self.state.agent_panel_sort =
+                    agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.agent_panel_scroll = 0;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {
@@ -2075,6 +2089,20 @@ mod tests {
         assert_eq!(
             app.state.agent_panel_scope,
             state::AgentPanelScope::CurrentWorkspace
+        );
+    }
+
+    #[test]
+    fn startup_uses_configured_agent_panel_sort() {
+        let mut config = Config::default();
+        config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::WorkingFirst;
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
+
+        assert_eq!(
+            app.state.agent_panel_sort,
+            state::AgentPanelSort::WorkingFirst
         );
     }
 

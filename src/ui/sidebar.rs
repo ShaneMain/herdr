@@ -8,7 +8,7 @@ use ratatui::{
 
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
 use super::status::{agent_icon, state_dot, state_label, state_label_color};
-use crate::app::state::{AgentPanelScope, Palette};
+use crate::app::state::{AgentPanelScope, AgentPanelSort, Palette};
 use crate::app::{AppState, Mode};
 use crate::detect::AgentState;
 use crate::terminal::TerminalRuntimeRegistry;
@@ -25,6 +25,7 @@ pub(crate) struct AgentPanelEntry {
     pub agent_label: Option<String>,
     pub state: AgentState,
     pub seen: bool,
+    pub last_state_change_at: Option<std::time::Instant>,
     pub custom_status: Option<String>,
     pub state_labels: std::collections::HashMap<String, String>,
 }
@@ -134,7 +135,7 @@ fn agent_panel_entries_with_runtimes(
         }
     };
 
-    match app.agent_panel_scope {
+    let mut entries: Vec<AgentPanelEntry> = match app.agent_panel_scope {
         AgentPanelScope::CurrentWorkspace => {
             let Some(ws_idx) = agent_panel_current_workspace_idx(app) else {
                 return Vec::new();
@@ -153,6 +154,7 @@ fn agent_panel_entries_with_runtimes(
                     agent_label: None,
                     state: detail.state,
                     seen: detail.seen,
+                    last_state_change_at: detail.last_state_change_at,
                     custom_status: detail.custom_status,
                     state_labels: detail.state_labels,
                 })
@@ -176,12 +178,36 @@ fn agent_panel_entries_with_runtimes(
                         agent_label: Some(detail.agent_label),
                         state: detail.state,
                         seen: detail.seen,
+                        last_state_change_at: detail.last_state_change_at,
                         custom_status: detail.custom_status,
                         state_labels: detail.state_labels,
                     })
             })
             .collect(),
+    };
+
+    // Stable sorts: entries with equal rank keep their workspace order.
+    match app.agent_panel_sort {
+        AgentPanelSort::Natural => {}
+        AgentPanelSort::WorkingFirst => {
+            entries.sort_by_key(|entry| !matches!(entry.state, AgentState::Working));
+        }
+        AgentPanelSort::Attention => {
+            // Primary: attention priority bucket. Secondary: within a bucket,
+            // the most recently changed agent first, so a large blocked/done
+            // group surfaces what just transitioned. `Reverse(Option<Instant>)`
+            // sorts `Some(newer)` before `Some(older)` before `None`. Stable
+            // sort keeps workspace order as the final tiebreaker.
+            entries.sort_by_key(|entry| {
+                (
+                    std::cmp::Reverse(workspace_attention_priority(entry.state, entry.seen)),
+                    std::cmp::Reverse(entry.last_state_change_at),
+                )
+            });
+        }
     }
+
+    entries
 }
 
 pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static str {
@@ -1286,6 +1312,108 @@ mod tests {
         assert_eq!(entries[1].agent_label.as_deref(), Some("claude"));
     }
 
+    #[test]
+    fn agent_panel_sort_orders_entries_by_configured_mode() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![
+            Workspace::test_new("one"),
+            Workspace::test_new("two"),
+            Workspace::test_new("three"),
+            Workspace::test_new("four"),
+        ];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_scope = AgentPanelScope::AllWorkspaces;
+
+        let set_state = |app: &mut crate::app::state::AppState, ws_idx: usize, state| {
+            let pane = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Claude);
+            terminal.state = state;
+        };
+        set_state(&mut app, 0, AgentState::Idle);
+        set_state(&mut app, 1, AgentState::Working);
+        set_state(&mut app, 2, AgentState::Working);
+        set_state(&mut app, 3, AgentState::Blocked);
+
+        // Default natural order keeps workspace order.
+        app.agent_panel_sort = AgentPanelSort::Natural;
+        let entries = agent_panel_entries(&app);
+        let labels: Vec<&str> = entries.iter().map(|e| e.primary_label.as_str()).collect();
+        assert_eq!(labels, ["one", "two", "three", "four"]);
+
+        // Working-first moves working agents up but keeps their relative order.
+        app.agent_panel_sort = AgentPanelSort::WorkingFirst;
+        let entries = agent_panel_entries(&app);
+        let labels: Vec<&str> = entries.iter().map(|e| e.primary_label.as_str()).collect();
+        assert_eq!(labels, ["two", "three", "one", "four"]);
+        assert!(entries
+            .iter()
+            .take(2)
+            .all(|e| matches!(e.state, AgentState::Working)));
+
+        // Attention ranks blocked above working above idle.
+        app.agent_panel_sort = AgentPanelSort::Attention;
+        let entries = agent_panel_entries(&app);
+        let labels: Vec<&str> = entries.iter().map(|e| e.primary_label.as_str()).collect();
+        assert_eq!(labels, ["four", "two", "three", "one"]);
+
+        // An unseen idle agent ("done") outranks working agents.
+        let done_pane = app.workspaces[0].tabs[0].root_pane;
+        app.workspaces[0].tabs[0]
+            .panes
+            .get_mut(&done_pane)
+            .unwrap()
+            .seen = false;
+        let entries = agent_panel_entries(&app);
+        let labels: Vec<&str> = entries.iter().map(|e| e.primary_label.as_str()).collect();
+        assert_eq!(labels, ["four", "one", "two", "three"]);
+    }
+
+    #[test]
+    fn attention_sort_breaks_ties_by_state_change_recency() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![
+            Workspace::test_new("one"),
+            Workspace::test_new("two"),
+            Workspace::test_new("three"),
+        ];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_scope = AgentPanelScope::AllWorkspaces;
+        app.agent_panel_sort = AgentPanelSort::Attention;
+
+        // All three working (same attention bucket) with distinct change times.
+        // Workspace order is one, two, three; recency is two (newest) > three >
+        // one (oldest, left as None to test the None-sorts-last fallback).
+        let base = std::time::Instant::now();
+        let set = |app: &mut crate::app::state::AppState,
+                   ws_idx: usize,
+                   at: Option<std::time::Instant>| {
+            let pane = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
+            terminal.detected_agent = Some(Agent::Claude);
+            terminal.state = AgentState::Working;
+            terminal.last_state_change_at = at;
+        };
+        set(&mut app, 0, None);
+        set(&mut app, 1, Some(base + std::time::Duration::from_secs(2)));
+        set(&mut app, 2, Some(base + std::time::Duration::from_secs(1)));
+
+        let entries = agent_panel_entries(&app);
+        let labels: Vec<&str> = entries.iter().map(|e| e.primary_label.as_str()).collect();
+        // Most recent first within the bucket; the untimestamped row sorts last.
+        assert_eq!(labels, ["two", "three", "one"]);
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn all_workspaces_agent_panel_entries_use_live_root_runtime_cwd_for_workspace_label() {
@@ -1394,6 +1522,7 @@ mod tests {
             agent_label: Some("claude".into()),
             state: AgentState::Idle,
             seen: true,
+            last_state_change_at: None,
             custom_status: None,
             state_labels: std::collections::HashMap::new(),
         };

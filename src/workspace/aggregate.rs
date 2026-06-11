@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use crate::detect::{Agent, AgentState};
 use crate::layout::PaneId;
@@ -17,6 +18,7 @@ pub struct PaneDetail {
     pub agent: Option<Agent>,
     pub state: AgentState,
     pub seen: bool,
+    pub last_state_change_at: Option<Instant>,
     pub custom_status: Option<String>,
     pub state_labels: HashMap<String, String>,
 }
@@ -60,6 +62,7 @@ impl Tab {
                     agent: terminal.effective_known_agent(),
                     state: terminal.state,
                     seen: pane.seen,
+                    last_state_change_at: terminal.last_state_change_at,
                     custom_status: presentation.custom_status,
                     state_labels: presentation.state_labels,
                 })

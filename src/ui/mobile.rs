@@ -959,6 +959,7 @@ mod tests {
             agent_label: agent_label.map(str::to_string),
             state: AgentState::Idle,
             seen: true,
+            last_state_change_at: None,
             custom_status: None,
             state_labels: std::collections::HashMap::new(),
         }

@@ -73,6 +73,10 @@ pub struct TerminalState {
     suppressed_full_lifecycle_hook_reports: HashMap<String, SuppressedFullLifecycleHookReport>,
     metadata_report_sequences: HashMap<String, u64>,
     pub state: AgentState,
+    /// When `state` last transitioned to a different `AgentState`. Stamped only
+    /// on real state changes, not on seen-flag flips, so it can tiebreak agent
+    /// panel ordering by recency without click-to-view reshuffling rows.
+    pub last_state_change_at: Option<Instant>,
     pub revision: u64,
     pub launch_argv: Option<Vec<String>>,
     pub respawn_shell_on_exit: bool,
@@ -97,6 +101,7 @@ impl TerminalState {
             suppressed_full_lifecycle_hook_reports: HashMap::new(),
             metadata_report_sequences: HashMap::new(),
             state: AgentState::Unknown,
+            last_state_change_at: None,
             revision: 0,
             launch_argv: None,
             respawn_shell_on_exit: false,
@@ -904,6 +909,7 @@ impl TerminalState {
         self.agent_metadata.clear();
         self.suppressed_full_lifecycle_hook_reports.clear();
         self.state = AgentState::Unknown;
+        self.last_state_change_at = None;
         self.launch_argv = None;
         self.respawn_shell_on_exit = false;
         self.pending_agent_resume_plan = None;
@@ -958,6 +964,9 @@ impl TerminalState {
             return None;
         }
 
+        if previous_state != state {
+            self.last_state_change_at = Some(now);
+        }
         self.state = state;
         Some(EffectiveStateChange {
             previous_agent_label,
@@ -1004,6 +1013,53 @@ mod tests {
         };
 
         assert_eq!(stabilize_agent_detection(detection), AgentState::Idle);
+    }
+
+    #[test]
+    fn last_state_change_at_stamps_only_on_real_state_transitions() {
+        let t0 = Instant::now();
+        let mut terminal = test_terminal();
+        assert_eq!(terminal.last_state_change_at, None);
+
+        // First transition to Working stamps the change time.
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Pi),
+            AgentState::Working,
+            false,
+            false,
+            false,
+            false,
+            t0,
+        );
+        assert_eq!(terminal.state, AgentState::Working);
+        assert_eq!(terminal.last_state_change_at, Some(t0));
+
+        // Re-detecting the same state must not move the timestamp, so a
+        // click-to-view (or any non-transition) does not reshuffle the row.
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Pi),
+            AgentState::Working,
+            false,
+            false,
+            false,
+            false,
+            t0 + Duration::from_secs(5),
+        );
+        assert_eq!(terminal.last_state_change_at, Some(t0));
+
+        // A real transition re-stamps with the new time.
+        let t2 = t0 + Duration::from_secs(10);
+        terminal.set_detected_state_with_screen_signals_at(
+            Some(Agent::Pi),
+            AgentState::Blocked,
+            true,
+            false,
+            false,
+            false,
+            t2,
+        );
+        assert_eq!(terminal.state, AgentState::Blocked);
+        assert_eq!(terminal.last_state_change_at, Some(t2));
     }
 
     #[test]
